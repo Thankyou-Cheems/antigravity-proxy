@@ -42,3 +42,6 @@ Ankh.NoLoad
 
 #Visual Studio Code files
 .vscode/
+
+#输出文件
+output/
