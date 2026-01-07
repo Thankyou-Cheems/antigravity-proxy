@@ -45,6 +45,21 @@ inline bool WaitWritable(SOCKET sock, int timeoutMs) {
     return false;
 }
 
+// 等待连接完成并检查 SO_ERROR，适配非阻塞 connect
+inline bool WaitConnect(SOCKET sock, int timeoutMs) {
+    if (!WaitWritable(sock, timeoutMs)) return false;
+    int soError = 0;
+    int optLen = sizeof(soError);
+    if (getsockopt(sock, SOL_SOCKET, SO_ERROR, (char*)&soError, &optLen) != 0) {
+        return false;
+    }
+    if (soError != 0) {
+        WSASetLastError(soError);
+        return false;
+    }
+    return true;
+}
+
 // 确保完整发送，兼容非阻塞套接字
 inline bool SendAll(SOCKET sock, const char* data, int len, int timeoutMs) {
     int totalSent = 0;

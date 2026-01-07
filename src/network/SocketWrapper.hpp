@@ -21,8 +21,20 @@ namespace Network {
         }
 
         static bool RedirectToProxy(sockaddr_in* addr, const std::string& proxyHost, int proxyPort) {
-            // Convert domain to IP if needed (simplified: assume config is IP for Phase 1)
-            inet_pton(AF_INET, proxyHost.c_str(), &addr->sin_addr);
+            if (!addr) return false;
+            // 优先直接解析 IPv4 字符串，失败时尝试 DNS 解析
+            if (inet_pton(AF_INET, proxyHost.c_str(), &addr->sin_addr) != 1) {
+                addrinfo hints{};
+                hints.ai_family = AF_INET;
+                hints.ai_socktype = SOCK_STREAM;
+                hints.ai_protocol = IPPROTO_TCP;
+                addrinfo* res = nullptr;
+                int rc = getaddrinfo(proxyHost.c_str(), nullptr, &hints, &res);
+                if (rc != 0 || !res) return false;
+                auto* resolved = (sockaddr_in*)res->ai_addr;
+                addr->sin_addr = resolved->sin_addr;
+                freeaddrinfo(res);
+            }
             addr->sin_port = htons(proxyPort);
             return true;
         }

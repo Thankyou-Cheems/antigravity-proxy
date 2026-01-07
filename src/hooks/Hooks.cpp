@@ -16,6 +16,7 @@
 #include "../network/FakeIP.hpp"
 #include "../network/Socks5.hpp"
 #include "../network/HttpConnect.hpp"
+#include "../network/SocketIo.hpp"
 #include "../network/TrafficMonitor.hpp"
 #include "../injection/ProcessInjector.hpp"
 
@@ -123,10 +124,43 @@ static bool BuildProxyAddr(const Core::ProxyConfig& proxy, sockaddr_in* proxyAdd
         proxyAddr->sin_family = AF_INET;
     }
     if (inet_pton(AF_INET, proxy.host.c_str(), &proxyAddr->sin_addr) != 1) {
-        Core::Logger::Error("代理地址解析失败: " + proxy.host);
-        return false;
+        // 尝试使用 DNS 解析代理主机名（仅 IPv4）
+        addrinfo hints{};
+        hints.ai_family = AF_INET;
+        hints.ai_socktype = SOCK_STREAM;
+        hints.ai_protocol = IPPROTO_TCP;
+        addrinfo* res = nullptr;
+        int rc = fpGetAddrInfo ? fpGetAddrInfo(proxy.host.c_str(), nullptr, &hints, &res)
+                               : getaddrinfo(proxy.host.c_str(), nullptr, &hints, &res);
+        if (rc != 0 || !res) {
+            Core::Logger::Error("代理地址解析失败: " + proxy.host + ", 错误码=" + std::to_string(rc));
+            return false;
+        }
+        auto* addr = (sockaddr_in*)res->ai_addr;
+        proxyAddr->sin_addr = addr->sin_addr;
+        freeaddrinfo(res);
     }
     proxyAddr->sin_port = htons(proxy.port);
+    return true;
+}
+
+// 解析目标域名为 IPv4 地址，供 WSAConnectByName 走代理
+static bool ResolveNameToAddr(const std::string& node, const std::string& service, sockaddr_in* out) {
+    if (!out || node.empty()) return false;
+    addrinfo hints{};
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_protocol = IPPROTO_TCP;
+    addrinfo* res = nullptr;
+    const char* serviceStr = service.empty() ? nullptr : service.c_str();
+    int rc = fpGetAddrInfo ? fpGetAddrInfo(node.c_str(), serviceStr, &hints, &res)
+                           : getaddrinfo(node.c_str(), serviceStr, &hints, &res);
+    if (rc != 0 || !res) {
+        Core::Logger::Error("目标地址解析失败: " + node + ", 错误码=" + std::to_string(rc));
+        return false;
+    }
+    *out = *(sockaddr_in*)res->ai_addr;
+    freeaddrinfo(res);
     return true;
 }
 
@@ -252,8 +286,18 @@ int PerformProxyConnect(SOCKET s, const struct sockaddr* name, int namelen, bool
             fpConnect(s, (sockaddr*)&proxyAddr, sizeof(proxyAddr));
         
         if (result != 0) {
-            Core::Logger::Error("连接代理服务器失败");
-            return result;
+            int err = WSAGetLastError();
+            if (err == WSAEWOULDBLOCK || err == WSAEINPROGRESS) {
+                // 非阻塞 connect 需要等待连接完成
+                if (!Network::SocketIo::WaitConnect(s, config.timeout.connect_ms)) {
+                    int waitErr = WSAGetLastError();
+                    Core::Logger::Error("连接代理服务器失败, WSA错误码=" + std::to_string(waitErr));
+                    return SOCKET_ERROR;
+                }
+            } else {
+                Core::Logger::Error("连接代理服务器失败, WSA错误码=" + std::to_string(err));
+                return result;
+            }
         }
         
         if (!DoProxyHandshake(s, originalHost, originalPort)) {
@@ -382,6 +426,22 @@ BOOL WSAAPI DetourWSAConnectByNameA(
         WSASetLastError(WSAEINVAL);
         return FALSE;
     }
+    auto& config = Core::Config::Instance();
+    if (config.proxy.port != 0 && !node.empty() && !Reserved) {
+        sockaddr_in targetAddr{};
+        if (ResolveNameToAddr(node, service, &targetAddr)) {
+            // 回填目标地址（如调用方提供缓冲区）
+            if (RemoteAddress && RemoteAddressLength && *RemoteAddressLength >= sizeof(sockaddr_in)) {
+                memcpy(RemoteAddress, &targetAddr, sizeof(sockaddr_in));
+                *RemoteAddressLength = sizeof(sockaddr_in);
+            }
+            int rc = PerformProxyConnect(s, (sockaddr*)&targetAddr, sizeof(targetAddr), true);
+            return rc == 0 ? TRUE : FALSE;
+        }
+        Core::Logger::Warn("WSAConnectByNameA 解析失败，回退原始实现");
+    } else if (Reserved) {
+        Core::Logger::Info("WSAConnectByNameA 使用 Overlapped，回退原始实现");
+    }
     return fpWSAConnectByNameA(s, nodename, servicename, LocalAddressLength, LocalAddress, RemoteAddressLength, RemoteAddress, timeout, Reserved);
 }
 
@@ -404,6 +464,22 @@ BOOL WSAAPI DetourWSAConnectByNameW(
     if (!fpWSAConnectByNameW) {
         WSASetLastError(WSAEINVAL);
         return FALSE;
+    }
+    auto& config = Core::Config::Instance();
+    if (config.proxy.port != 0 && !node.empty() && !Reserved) {
+        sockaddr_in targetAddr{};
+        if (ResolveNameToAddr(node, service, &targetAddr)) {
+            // 回填目标地址（如调用方提供缓冲区）
+            if (RemoteAddress && RemoteAddressLength && *RemoteAddressLength >= sizeof(sockaddr_in)) {
+                memcpy(RemoteAddress, &targetAddr, sizeof(sockaddr_in));
+                *RemoteAddressLength = sizeof(sockaddr_in);
+            }
+            int rc = PerformProxyConnect(s, (sockaddr*)&targetAddr, sizeof(targetAddr), true);
+            return rc == 0 ? TRUE : FALSE;
+        }
+        Core::Logger::Warn("WSAConnectByNameW 解析失败，回退原始实现");
+    } else if (Reserved) {
+        Core::Logger::Info("WSAConnectByNameW 使用 Overlapped，回退原始实现");
     }
     return fpWSAConnectByNameW(s, nodename, servicename, LocalAddressLength, LocalAddress, RemoteAddressLength, RemoteAddress, timeout, Reserved);
 }
