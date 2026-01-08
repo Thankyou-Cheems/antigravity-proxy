@@ -21,6 +21,11 @@ param(
 )
 
 # ============================================================
+# 版本信息 (在此处统一管理版本号)
+# ============================================================
+$Version = "1.1.0"
+
+# ============================================================
 # 辅助函数
 # ============================================================
 
@@ -223,7 +228,7 @@ Write-Step "生成配置文件..."
 
 $configJson = @{
     "_comment" = "Antigravity-Proxy 配置文件"
-    "_version" = "1.1.0"
+    "_version" = $Version
     "_build" = @{
         "date" = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
         "config" = $Config
@@ -272,20 +277,36 @@ Antigravity-Proxy 是一个基于 MinHook 的 Windows DLL 代理注入工具。
 
 ### 1. 部署文件
 将以下文件复制到目标程序的目录：
-- `version.dll` (编译生成的 DLL)
-- `config.json` (配置文件)
+- ` version.dll ` (编译生成的 DLL)
+- ` config.json ` (配置文件)
 
 ### 2. 配置代理
 编辑 `config.json`，设置代理服务器地址：
-```json
+``````jsonc
 {
     "proxy": {
-        "host": "127.0.0.1",
-        "port": 7890,
-        "type": "socks5"
-    }
+        "host": "127.0.0.1",       // 代理服务器地址
+        "port": 7890,              // 代理服务器端口
+        "type": "socks5"           // 代理类型: socks5 或 http
+    },
+    "fake_ip": {
+        "enabled": true,           // 是否启用 FakeIP 系统 (拦截 DNS 解析)
+        "cidr": "10.0.0.0/8"       // FakeIP 分配的虚拟 IP 地址范围
+    },
+    "timeout": {
+        "connect": 5000,           // 连接超时 (毫秒)
+        "send": 5000,              // 发送超时 (毫秒)
+        "recv": 5000               // 接收超时 (毫秒)
+    },
+    "traffic_logging": false,      // 是否记录流量日志 (调试用)
+    "child_injection": true,       // 是否自动注入子进程
+    "target_processes": [          // 目标进程列表 (空数组=注入所有子进程)
+        "language_server_windows",
+        "Antigravity.exe"
+    ]
 }
-```
+``````
+
 
 ### 3. 启动目标程序
 直接启动目标程序，DLL 会自动加载并重定向网络流量。
@@ -342,9 +363,13 @@ A: 检查目标程序目录是否生成 `proxy.log` 文件。
 - 编译时间: $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
 - 编译配置: $Config
 - 目标架构: $Arch
+- 编译版本: $Version
+- 开发环境: Windows 11
+- 开发者: 煎饼果子@86
 
 ---
 GitHub: https://github.com/yuaotian/antigravity-proxy
+关注公众号「煎饼果子卷AI」获取最新动态
 "@
 
 $usagePath = Join-Path $OutputDir "使用说明.md"
