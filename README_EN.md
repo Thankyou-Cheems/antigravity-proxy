@@ -375,6 +375,14 @@ target_link_libraries(version PRIVATE ws2_32)
 ```
 </details>
 
+## ❓ Common Errors and Error Codes
+
+> When issues occur, first confirm the target app architecture (x86/x64) and check logs (e.g. `proxy-YYYYMMDD.log`).
+
+| Error Code | Description | Possible Cause | Solution |
+|-----------|-------------|----------------|----------|
+| `VCRUNTIME140_1.dll missing` | System error: \"VCRUNTIME140_1.dll was not found\" | VC++ 2015-2022 runtime not installed or removed by security software | Install VC++ 2015-2022 Redistributable (x64/x86)<br>Or build with static runtime: `.\build.ps1 -StaticRuntime` |
+
 ---
 
 ## 📝 Usage

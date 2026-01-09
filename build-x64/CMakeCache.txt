@@ -188,6 +188,9 @@ CMAKE_STATIC_LINKER_FLAGS_RELWITHDEBINFO:STRING=
 // Studio IDE projects all commands are done without /nologo.
 CMAKE_VERBOSE_MAKEFILE:BOOL=FALSE
 
+//使用静态运行库(/MT)，减少运行库依赖
+STATIC_RUNTIME:BOOL=ON
+
 //Value Computed by CMake
 antigravity-proxy_BINARY_DIR:STATIC=E:/ProjectCode/C++Code/antigravity-proxy/build-x64
 
